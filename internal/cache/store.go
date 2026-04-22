@@ -66,7 +66,7 @@ func (s *Store) Get(key string) (*Entry, bool) {
 	}
 
 	if e.InvalidateAfterRead {
-		s.Delete(e.Key)
+		s.remove(e.Key)
 	} else {
 		s.policy.Touch(e.Key)
 	}
@@ -78,6 +78,18 @@ func (s *Store) Delete(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.remove(key)
+}
+
+func (s *Store) remove(key string) {
 	delete(s.data, key)
 	s.policy.Remove(key)
+}
+
+func (s *Store) Flush() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.data = make(map[string]*Entry)
+	s.policy.Reset()
 }

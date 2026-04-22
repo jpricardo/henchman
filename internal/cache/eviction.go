@@ -7,6 +7,7 @@ type EvictionPolicy interface {
 	Touch(key string)
 	Remove(key string)
 	Evict() (key string, sizeBytes int64, ok bool)
+	Reset()
 	CurrentBytes() int64
 	CurrentKeys() int64
 }
@@ -71,6 +72,12 @@ func (ep *LRUEvictionPolicy) Evict() (key string, sizeBytes int64, ok bool) {
 	ep.Remove(entry.key)
 
 	return entry.key, entry.sizeBytes, true
+}
+
+func (ep *LRUEvictionPolicy) Reset() {
+	ep.currentBytes = 0
+	ep.keyMap = make(map[string]*list.Element)
+	ep.list = list.List{}
 }
 
 func (ep *LRUEvictionPolicy) CurrentBytes() int64 {
