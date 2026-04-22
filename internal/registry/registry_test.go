@@ -14,16 +14,16 @@ func TestRegistry_Registration(t *testing.T) {
 	gb := budget.NewGlobalBudget(math.MaxInt64)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		policy:   cache.NewLRUEvictionPolicy(),
-		maxBytes: 512,
-		maxKeys:  20,
+		Policy:   cache.NewLRUEvictionPolicy(),
+		MaxBytes: 512,
+		MaxKeys:  20,
 	}
 
 	token, err := r.Register("test-instance", c)
 	if err != nil {
 		t.Error(err.Error())
 	}
-	defer r.Flush(token)
+	defer r.Remove(token)
 
 	if i, ok := r.Resolve(token); i == nil || !ok {
 		t.Error("Expected Resolve to return an instance")
@@ -34,22 +34,22 @@ func TestRegistry_TokenUniqueness(t *testing.T) {
 	gb := budget.NewGlobalBudget(math.MaxInt64)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		policy:   cache.NewLRUEvictionPolicy(),
-		maxBytes: 512,
-		maxKeys:  20,
+		Policy:   cache.NewLRUEvictionPolicy(),
+		MaxBytes: 512,
+		MaxKeys:  20,
 	}
 
 	t1, err := r.Register("test-instance-1", c)
 	if err != nil {
 		t.Error(err.Error())
 	}
-	defer r.Flush(t1)
+	defer r.Remove(t1)
 
 	t2, err := r.Register("test-instance-2", c)
 	if err != nil {
 		t.Error(err.Error())
 	}
-	defer r.Flush(t2)
+	defer r.Remove(t2)
 
 	if t1 == t2 {
 		t.Error("Expected tokens to be unique")
@@ -60,16 +60,16 @@ func TestRegistry_ReRegistration(t *testing.T) {
 	gb := budget.NewGlobalBudget(math.MaxInt64)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		policy:   cache.NewLRUEvictionPolicy(),
-		maxBytes: 512,
-		maxKeys:  20,
+		Policy:   cache.NewLRUEvictionPolicy(),
+		MaxBytes: 512,
+		MaxKeys:  20,
 	}
 
 	t1, err := r.Register("test-instance-1", c)
 	if err != nil {
 		t.Error(err.Error())
 	}
-	defer r.Flush(t1)
+	defer r.Remove(t1)
 
 	i1 := r.byToken[t1]
 	e := cache.Entry{Key: "test-key"}
@@ -82,9 +82,9 @@ func TestRegistry_ReRegistration(t *testing.T) {
 	if err != nil {
 		t.Error(err.Error())
 	}
-	defer r.Flush(t2)
+	defer r.Remove(t2)
 
-	if _, ok := i1.store.Get(e.Key); ok {
+	if _, ok := i1.store.Get(e.Key, false); ok {
 		t.Error("Expected Get to fail")
 	}
 }
@@ -93,47 +93,47 @@ func TestRegistry_BudgetRelease(t *testing.T) {
 	gb := budget.NewGlobalBudget(512)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		policy:   cache.NewLRUEvictionPolicy(),
-		maxBytes: 512,
-		maxKeys:  20,
+		Policy:   cache.NewLRUEvictionPolicy(),
+		MaxBytes: 512,
+		MaxKeys:  20,
 	}
 
 	t1, err := r.Register("test-instance-1", c)
 	if err != nil {
 		t.Error(err.Error())
 	}
-	defer r.Flush(t1)
+	defer r.Remove(t1)
 
 	t2, err := r.Register("test-instance-2", c)
 	if err == nil {
 		t.Error("Expected Register to fail")
 	}
-	defer r.Flush(t2)
+	defer r.Remove(t2)
 
-	r.Flush(t1)
+	r.Remove(t1)
 
 	t3, err := r.Register("test-instance-2", c)
 	if err != nil {
 		t.Error(err.Error())
 	}
-	defer r.Flush(t3)
+	defer r.Remove(t3)
 }
 
 func TestRegistry_Sweep(t *testing.T) {
 	gb := budget.NewGlobalBudget(math.MaxInt64)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		policy:        cache.NewLRUEvictionPolicy(),
-		maxBytes:      512,
-		maxKeys:       20,
-		sweepInterval: 50 * time.Millisecond,
+		Policy:        cache.NewLRUEvictionPolicy(),
+		MaxBytes:      512,
+		MaxKeys:       20,
+		SweepInterval: 50 * time.Millisecond,
 	}
 
 	token, err := r.Register("test-instance-1", c)
 	if err != nil {
 		t.Error(err.Error())
 	}
-	defer r.Flush(token)
+	defer r.Remove(token)
 
 	i1 := r.byToken[token]
 
@@ -142,9 +142,9 @@ func TestRegistry_Sweep(t *testing.T) {
 		t.Error(err.Error())
 	}
 
-	time.Sleep(2 * c.sweepInterval)
+	time.Sleep(2 * c.SweepInterval)
 
-	if i, ok := i1.store.Get("test-key"); i != nil || ok {
+	if i, ok := i1.store.Get("test-key", false); i != nil || ok {
 		t.Error("Expected key to be gone")
 	}
 
@@ -157,14 +157,14 @@ func TestRegistry_SweepStopsOnContextCancel(t *testing.T) {
 	gb := budget.NewGlobalBudget(math.MaxInt64)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		policy:        cache.NewLRUEvictionPolicy(),
-		maxBytes:      512,
-		maxKeys:       20,
-		sweepInterval: 50 * time.Millisecond,
+		Policy:        cache.NewLRUEvictionPolicy(),
+		MaxBytes:      512,
+		MaxKeys:       20,
+		SweepInterval: 50 * time.Millisecond,
 	}
 
 	token, _ := r.Register("test-instance", c)
-	r.Flush(token)
+	r.Remove(token)
 
 	goleak.VerifyNone(t)
 }

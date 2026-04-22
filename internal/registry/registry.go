@@ -25,6 +25,7 @@ type Instance struct {
 	cancel         context.CancelFunc
 	allocatedBytes int64
 	sweepInterval  time.Duration
+	defaultTTL     time.Duration
 	metrics        *InstanceMetrics
 }
 
@@ -44,11 +45,14 @@ func NewRegistry(gb *budget.GlobalBudget) *Registry {
 	}
 }
 
+// #region Registry
+
 type RegisterConfig struct {
-	policy        cache.EvictionPolicy
-	maxBytes      int64
-	maxKeys       int64
-	sweepInterval time.Duration
+	Policy        cache.EvictionPolicy
+	MaxBytes      int64
+	MaxKeys       int64
+	SweepInterval time.Duration
+	DefaultTTL    time.Duration
 }
 
 func (r *Registry) Register(id string, config RegisterConfig) (string, error) {
@@ -59,16 +63,16 @@ func (r *Registry) Register(id string, config RegisterConfig) (string, error) {
 		r.remove(i.token)
 	}
 
-	err := r.gb.Reserve(config.maxBytes)
+	err := r.gb.Reserve(config.MaxBytes)
 	if err != nil {
 		return "", err
 	}
 
-	s := cache.NewStore(config.policy, config.maxBytes, config.maxKeys)
+	s := cache.NewStore(config.Policy, config.MaxBytes, config.MaxKeys)
 
 	t, err := generateRandomHex(16)
 	if err != nil {
-		r.gb.Release(config.maxBytes)
+		r.gb.Release(config.MaxBytes)
 		return "", err
 	}
 
@@ -80,8 +84,9 @@ func (r *Registry) Register(id string, config RegisterConfig) (string, error) {
 		store:          s,
 		ctx:            ctx,
 		cancel:         cancel,
-		allocatedBytes: config.maxBytes,
-		sweepInterval:  config.sweepInterval,
+		allocatedBytes: config.MaxBytes,
+		sweepInterval:  config.SweepInterval,
+		defaultTTL:     config.DefaultTTL,
 		metrics:        &InstanceMetrics{},
 	}
 
@@ -93,7 +98,7 @@ func (r *Registry) Register(id string, config RegisterConfig) (string, error) {
 	return i.token, nil
 }
 
-func (r *Registry) Flush(token string) {
+func (r *Registry) Remove(token string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -119,12 +124,59 @@ func (r *Registry) Resolve(token string) (*Instance, bool) {
 	return i, exists
 }
 
+func (r *Registry) Shutdown() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for token := range r.byToken {
+		r.remove(token)
+	}
+}
+
+// #endregion
+
+// #region Instance
+
+func (i *Instance) Get(key string, invalidateMatched bool) (*cache.Entry, bool) {
+	e, ok := i.store.Get(key, invalidateMatched)
+
+	return e, ok
+}
+
+func (i *Instance) Set(entry *cache.Entry) error {
+	err := i.store.Set(entry)
+
+	return err
+}
+
+func (i *Instance) Delete(key string) {
+	i.store.Delete(key)
+}
+
+func (i *Instance) Query(keyPrefix string, invalidateMatched bool) []*cache.Entry {
+	return i.store.Query(keyPrefix, invalidateMatched)
+}
+
+func (i *Instance) Flush() {
+	i.store.Flush()
+}
+
+func (i *Instance) Token() string {
+	return i.token
+}
+
+func (i *Instance) DefaultTTL() time.Duration {
+	return i.defaultTTL
+}
+
 func (m *InstanceMetrics) ExpiredKeys() int64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	return m.expiredKeys
 }
+
+// #endregion
 
 func sweep(ctx context.Context, s *cache.Store, metrics *InstanceMetrics, interval time.Duration) {
 	if interval <= 0 {

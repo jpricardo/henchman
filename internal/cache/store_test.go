@@ -24,13 +24,13 @@ func TestStore_CRUD(t *testing.T) {
 		t.Error(err.Error())
 	}
 
-	if _, ok := s.Get(e.Key); !ok {
+	if _, ok := s.Get(e.Key, false); !ok {
 		t.Errorf("Unable to get key %s, got ok=false", e.Key)
 	}
 
 	s.Delete(e.Key)
 
-	if _, ok := s.Get(e.Key); ok {
+	if _, ok := s.Get(e.Key, false); ok {
 		t.Errorf("Shouldn't have been able to get deleted key %s, got ok=true", e.Key)
 	}
 }
@@ -56,11 +56,11 @@ func TestStore_EvictionOnFull(t *testing.T) {
 		t.Error(err.Error())
 	}
 
-	if _, ok := s.Get(e.Key); !ok {
+	if _, ok := s.Get(e.Key, false); !ok {
 		t.Errorf("Expected key %s to have been added to the store", e.Key)
 	}
 
-	if _, ok := s.Get("key-1"); ok {
+	if _, ok := s.Get("key-1", false); ok {
 		t.Error("Expected key-1 to have been evicted")
 	}
 
@@ -89,7 +89,7 @@ func TestStore_ExpiredKey(t *testing.T) {
 		t.Error(err.Error())
 	}
 
-	if _, ok := s.Get(e.Key); ok {
+	if _, ok := s.Get(e.Key, false); ok {
 		t.Error("Expected Get to fail on expired key")
 	}
 }

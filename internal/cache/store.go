@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -56,7 +57,7 @@ func (s *Store) Set(entry *Entry) error {
 	return nil
 }
 
-func (s *Store) Get(key string) (*Entry, bool) {
+func (s *Store) Get(key string, invalidateMatched bool) (*Entry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -65,7 +66,7 @@ func (s *Store) Get(key string) (*Entry, bool) {
 		return nil, false
 	}
 
-	if e.InvalidateAfterRead {
+	if e.InvalidateAfterRead || invalidateMatched {
 		s.remove(e.Key)
 	} else {
 		s.policy.Touch(e.Key)
@@ -113,4 +114,34 @@ func (s *Store) Sweep() int64 {
 	}
 
 	return e
+}
+
+func (s *Store) Query(keyPrefix string, invalidateMatched bool) []*Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r := []*Entry{}
+
+	for k := range s.data {
+		if !strings.HasPrefix(k, keyPrefix) {
+			continue
+		}
+
+		v, ok := s.data[k]
+		if !ok {
+			continue
+		}
+
+		if !v.ExpiresAt.IsZero() && v.ExpiresAt.Before(time.Now()) {
+			continue
+		}
+
+		r = append(r, v)
+
+		if invalidateMatched {
+			s.remove(k)
+		}
+	}
+
+	return r
 }
