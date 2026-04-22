@@ -47,8 +47,8 @@ func (s *Store) Set(entry *Entry) error {
 }
 
 func (s *Store) Get(key string) (*Entry, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	e := s.data[key]
 	if e == nil || (!e.ExpiresAt.IsZero() && e.ExpiresAt.Before(time.Now())) {
