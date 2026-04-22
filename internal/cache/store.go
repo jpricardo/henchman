@@ -55,7 +55,12 @@ func (s *Store) Get(key string) (*Entry, bool) {
 		return nil, false
 	}
 
-	s.policy.Touch(e.Key)
+	if e.InvalidateAfterRead {
+		s.policy.Remove(e.Key)
+	} else {
+		s.policy.Touch(e.Key)
+	}
+
 	return e, true
 }
 
