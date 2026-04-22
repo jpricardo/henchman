@@ -30,7 +30,7 @@ func TestLRUEvictionPolicy_EvictionOrder(t *testing.T) {
 	}
 
 	if e != "C" {
-		t.Errorf("Evicted key %s doesn't match expected %s", e, "B")
+		t.Errorf("Evicted key %s doesn't match expected %s", e, "C")
 	}
 }
 
