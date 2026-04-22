@@ -66,7 +66,7 @@ func (s *Store) Get(key string) (*Entry, bool) {
 	}
 
 	if e.InvalidateAfterRead {
-		s.policy.Remove(e.Key)
+		s.Delete(e.Key)
 	} else {
 		s.policy.Touch(e.Key)
 	}
