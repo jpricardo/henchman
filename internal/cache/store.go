@@ -14,6 +14,16 @@ type Store struct {
 	maxKeys  int64
 }
 
+func NewStore(policy EvictionPolicy, maxBytes int64, maxKeys int64) *Store {
+	return &Store{
+		mu:       sync.RWMutex{},
+		data:     map[string]*Entry{},
+		policy:   policy,
+		maxBytes: maxBytes,
+		maxKeys:  maxKeys,
+	}
+}
+
 func (s *Store) Set(entry *Entry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

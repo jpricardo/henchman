@@ -36,13 +36,8 @@ func TestStore_CRUD(t *testing.T) {
 }
 
 func TestStore_EvictionOnFull(t *testing.T) {
-	s := Store{
-		mu:       sync.RWMutex{},
-		data:     make(map[string]*Entry),
-		policy:   NewLRUEvictionPolicy(),
-		maxBytes: math.MaxInt64, // don't bother testing `maxBytes`, any change on the `Entry` struct could make the tests fail
-		maxKeys:  5,
-	}
+	// don't bother testing `maxBytes`, any change on the `Entry` struct could make the tests fail
+	s := NewStore(NewLRUEvictionPolicy(), math.MaxInt64, 5)
 
 	for idx := range s.maxKeys {
 		err := s.Set(&Entry{Key: fmt.Sprintf("key-%d", idx+1)})
@@ -75,13 +70,7 @@ func TestStore_EvictionOnFull(t *testing.T) {
 }
 
 func TestStore_OversizedEntry(t *testing.T) {
-	s := Store{
-		mu:       sync.RWMutex{},
-		data:     make(map[string]*Entry),
-		policy:   NewLRUEvictionPolicy(),
-		maxBytes: 1,
-		maxKeys:  1,
-	}
+	s := NewStore(NewLRUEvictionPolicy(), 1, 1)
 
 	e := Entry{}
 	err := s.Set(&e)
@@ -92,13 +81,7 @@ func TestStore_OversizedEntry(t *testing.T) {
 }
 
 func TestStore_ExpiredKey(t *testing.T) {
-	s := Store{
-		mu:       sync.RWMutex{},
-		data:     make(map[string]*Entry),
-		policy:   NewLRUEvictionPolicy(),
-		maxBytes: math.MaxInt64,
-		maxKeys:  5,
-	}
+	s := NewStore(NewLRUEvictionPolicy(), math.MaxInt64, 5)
 
 	e := Entry{ExpiresAt: time.Now().Add(-10 * time.Minute)}
 	err := s.Set(&e)
