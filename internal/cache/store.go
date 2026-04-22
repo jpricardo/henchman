@@ -93,3 +93,24 @@ func (s *Store) Flush() {
 	s.data = make(map[string]*Entry)
 	s.policy.Reset()
 }
+
+func (s *Store) Sweep() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e := int64(0)
+
+	for k := range s.data {
+		v, ok := s.data[k]
+		if !ok {
+			continue
+		}
+
+		if !v.ExpiresAt.IsZero() && v.ExpiresAt.Before(time.Now()) {
+			s.remove(v.Key)
+			e++
+		}
+	}
+
+	return e
+}

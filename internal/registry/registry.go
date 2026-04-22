@@ -4,12 +4,18 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"time"
 
 	"sync"
 
 	"github.com/jpricardo/henchman/internal/budget"
 	"github.com/jpricardo/henchman/internal/cache"
 )
+
+type InstanceMetrics struct {
+	mu          sync.RWMutex
+	expiredKeys int64
+}
 
 type Instance struct {
 	id             string
@@ -18,6 +24,8 @@ type Instance struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	allocatedBytes int64
+	sweepInterval  time.Duration
+	metrics        *InstanceMetrics
 }
 
 type Registry struct {
@@ -37,9 +45,10 @@ func NewRegistry(gb *budget.GlobalBudget) *Registry {
 }
 
 type RegisterConfig struct {
-	policy   cache.EvictionPolicy
-	maxBytes int64
-	maxKeys  int64
+	policy        cache.EvictionPolicy
+	maxBytes      int64
+	maxKeys       int64
+	sweepInterval time.Duration
 }
 
 func (r *Registry) Register(id string, config RegisterConfig) (string, error) {
@@ -72,10 +81,14 @@ func (r *Registry) Register(id string, config RegisterConfig) (string, error) {
 		ctx:            ctx,
 		cancel:         cancel,
 		allocatedBytes: config.maxBytes,
+		sweepInterval:  config.sweepInterval,
+		metrics:        &InstanceMetrics{},
 	}
 
 	r.byID[i.id] = &i
 	r.byToken[i.token] = &i
+
+	go sweep(ctx, s, i.metrics, i.sweepInterval)
 
 	return i.token, nil
 }
@@ -104,6 +117,32 @@ func (r *Registry) Resolve(token string) (*Instance, bool) {
 
 	i, exists := r.byToken[token]
 	return i, exists
+}
+
+func (m *InstanceMetrics) ExpiredKeys() int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.expiredKeys
+}
+
+func sweep(ctx context.Context, s *cache.Store, metrics *InstanceMetrics, interval time.Duration) {
+	if interval <= 0 {
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-time.After(interval):
+			e := s.Sweep()
+			metrics.mu.Lock()
+			metrics.expiredKeys += e
+			metrics.mu.Unlock()
+		}
+	}
 }
 
 func generateRandomHex(n int) (string, error) {
