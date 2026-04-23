@@ -148,8 +148,8 @@ func TestRegistry_Sweep(t *testing.T) {
 		t.Error("Expected key to be gone")
 	}
 
-	if i1.metrics.ExpiredKeys() == 0 {
-		t.Errorf("Expected expired keys to equal 1, got %d", i1.metrics.expiredKeys)
+	if i1.metrics.ExpiredSwept() == 0 {
+		t.Errorf("Expected expired swept to equal 1, got %d", i1.metrics.expiredSwept.Load())
 	}
 }
 

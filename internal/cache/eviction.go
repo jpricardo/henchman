@@ -10,6 +10,7 @@ type EvictionPolicy interface {
 	Reset()
 	CurrentBytes() int64
 	CurrentKeys() int64
+	Evictions() int64
 }
 
 // #region LRU
@@ -20,6 +21,7 @@ type lruEntry struct {
 
 type LRUEvictionPolicy struct {
 	currentBytes int64
+	evictions    int64
 	list         list.List
 	keyMap       map[string]*list.Element
 }
@@ -70,8 +72,13 @@ func (ep *LRUEvictionPolicy) Evict() (key string, sizeBytes int64, ok bool) {
 
 	entry := b.Value.(lruEntry)
 	ep.Remove(entry.key)
+	ep.evictions++
 
 	return entry.key, entry.sizeBytes, true
+}
+
+func (ep *LRUEvictionPolicy) Evictions() int64 {
+	return ep.evictions
 }
 
 func (ep *LRUEvictionPolicy) Reset() {

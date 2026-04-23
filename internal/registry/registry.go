@@ -4,17 +4,29 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"time"
-
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/jpricardo/henchman/internal/budget"
 	"github.com/jpricardo/henchman/internal/cache"
 )
 
 type InstanceMetrics struct {
-	mu          sync.RWMutex
-	expiredKeys int64
+	hits         atomic.Int64
+	misses       atomic.Int64
+	expiredSwept atomic.Int64
+}
+
+type MetricsSnapshot struct {
+	InstanceID   string
+	Hits         int64
+	Misses       int64
+	Evictions    int64
+	BytesUsed    int64
+	BytesCap     int64
+	KeysCurrent  int64
+	ExpiredSwept int64
 }
 
 type Instance struct {
@@ -139,8 +151,25 @@ func (r *Registry) Shutdown() {
 
 func (i *Instance) Get(key string, invalidateMatched bool) (*cache.Entry, bool) {
 	e, ok := i.store.Get(key, invalidateMatched)
-
+	if ok {
+		i.metrics.hits.Add(1)
+	} else {
+		i.metrics.misses.Add(1)
+	}
 	return e, ok
+}
+
+func (i *Instance) Snapshot() MetricsSnapshot {
+	return MetricsSnapshot{
+		InstanceID:   i.id,
+		Hits:         i.metrics.hits.Load(),
+		Misses:       i.metrics.misses.Load(),
+		Evictions:    i.store.Evictions(),
+		BytesUsed:    i.store.CurrentBytes(),
+		BytesCap:     i.allocatedBytes,
+		KeysCurrent:  i.store.CurrentKeys(),
+		ExpiredSwept: i.metrics.expiredSwept.Load(),
+	}
 }
 
 func (i *Instance) Set(entry *cache.Entry) error {
@@ -169,11 +198,19 @@ func (i *Instance) DefaultTTL() time.Duration {
 	return i.defaultTTL
 }
 
-func (m *InstanceMetrics) ExpiredKeys() int64 {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *InstanceMetrics) ExpiredSwept() int64 {
+	return m.expiredSwept.Load()
+}
 
-	return m.expiredKeys
+func (r *Registry) Snapshots() []MetricsSnapshot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	snapshots := make([]MetricsSnapshot, 0, len(r.byID))
+	for _, inst := range r.byID {
+		snapshots = append(snapshots, inst.Snapshot())
+	}
+	return snapshots
 }
 
 // #endregion
@@ -190,9 +227,7 @@ func sweep(ctx context.Context, s *cache.Store, metrics *InstanceMetrics, interv
 
 		case <-time.After(interval):
 			e := s.Sweep()
-			metrics.mu.Lock()
-			metrics.expiredKeys += e
-			metrics.mu.Unlock()
+			metrics.expiredSwept.Add(e)
 		}
 	}
 }

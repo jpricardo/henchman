@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/jpricardo/henchman/internal/budget"
+	"github.com/jpricardo/henchman/internal/metrics"
 	"github.com/jpricardo/henchman/internal/registry"
 	"github.com/jpricardo/henchman/internal/server"
 )
@@ -30,6 +34,14 @@ func main() {
 
 	go grpcSrv.Serve(lis)
 
+	metricsPort := getMetricsPort(9090)
+	metricsSrv := metrics.NewServer(metricsPort, r)
+	go func() {
+		if err := metricsSrv.Start(); err != nil && err != http.ErrServerClosed {
+			log.Printf("metrics server error: %v", err)
+		}
+	}()
+
 	log.Println("ready")
 
 	quit := make(chan os.Signal, 1)
@@ -37,6 +49,11 @@ func main() {
 	<-quit
 
 	grpcSrv.GracefulStop()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("metrics server shutdown error: %v", err)
+	}
 	r.Shutdown()
 }
 
@@ -68,6 +85,21 @@ func getPort(fallback string) string {
 	}
 
 	return port
+}
+
+func getMetricsPort(fallback int) int {
+	port := os.Getenv("HENCH_METRICS_PORT")
+	if port == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(port)
+	if err != nil {
+		log.Printf("invalid HENCH_METRICS_PORT: %s, using fallback %d", port, fallback)
+		return fallback
+	}
+
+	return parsed
 }
 
 func getMaxMemoryBytes(fallback int64) int64 {

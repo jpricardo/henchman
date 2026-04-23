@@ -116,6 +116,24 @@ func (s *Store) Sweep() int64 {
 	return e
 }
 
+func (s *Store) Evictions() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.policy.Evictions()
+}
+
+func (s *Store) CurrentBytes() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.policy.CurrentBytes()
+}
+
+func (s *Store) CurrentKeys() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.policy.CurrentKeys()
+}
+
 func (s *Store) Query(keyPrefix string, invalidateMatched bool) []*Entry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
