@@ -15,3 +15,6 @@ buf:
 
 compose-up:
 	docker compose up -d --build
+
+benchmark:
+	node bench.js
