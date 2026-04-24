@@ -9,3 +9,6 @@ run:
 
 test:
 	go test ./...
+
+buf:
+	buf generate

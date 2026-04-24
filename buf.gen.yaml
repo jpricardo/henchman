@@ -1,0 +1,27 @@
+version: v2
+
+inputs:
+  - directory: proto
+
+plugins:
+  # Node.js — messages + gRPC stubs (TypeScript)
+  - remote: buf.build/community/stephenh-ts-proto
+    out: gen/node
+    opt:
+      - outputServices=grpc-js
+
+  # C# — messages
+  - remote: buf.build/protocolbuffers/csharp
+    out: gen/csharp
+
+  # C# — gRPC service stubs
+  - remote: buf.build/grpc/csharp
+    out: gen/csharp
+
+  # Java — messages
+  - remote: buf.build/protocolbuffers/java
+    out: gen/java
+
+  # Java — gRPC service stubs
+  - remote: buf.build/grpc/java
+    out: gen/java
