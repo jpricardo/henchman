@@ -12,3 +12,6 @@ test:
 
 buf:
 	buf generate
+
+compose-up:
+	docker compose up -d --build
