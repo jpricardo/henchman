@@ -14,9 +14,9 @@ func TestRegistry_Registration(t *testing.T) {
 	gb := budget.NewGlobalBudget(math.MaxInt64)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		Policy:   cache.NewLRUEvictionPolicy(),
-		MaxBytes: 512,
-		MaxKeys:  20,
+		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
+		MaxBytes:      512,
+		MaxKeys:       20,
 	}
 
 	token, err := r.Register("test-instance", c)
@@ -34,9 +34,9 @@ func TestRegistry_TokenUniqueness(t *testing.T) {
 	gb := budget.NewGlobalBudget(math.MaxInt64)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		Policy:   cache.NewLRUEvictionPolicy(),
-		MaxBytes: 512,
-		MaxKeys:  20,
+		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
+		MaxBytes:      512,
+		MaxKeys:       20,
 	}
 
 	t1, err := r.Register("test-instance-1", c)
@@ -60,9 +60,10 @@ func TestRegistry_ReRegistration(t *testing.T) {
 	gb := budget.NewGlobalBudget(math.MaxInt64)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		Policy:   cache.NewLRUEvictionPolicy(),
-		MaxBytes: 512,
-		MaxKeys:  20,
+		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
+		MaxBytes:      2048,
+		MaxKeys:       20,
+		ShardCount:    16,
 	}
 
 	t1, err := r.Register("test-instance-1", c)
@@ -90,12 +91,13 @@ func TestRegistry_ReRegistration(t *testing.T) {
 }
 
 func TestRegistry_BudgetRelease(t *testing.T) {
-	gb := budget.NewGlobalBudget(512)
+	gb := budget.NewGlobalBudget(2048)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		Policy:   cache.NewLRUEvictionPolicy(),
-		MaxBytes: 512,
-		MaxKeys:  20,
+		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
+		MaxBytes:      2048,
+		MaxKeys:       20,
+		ShardCount:    16,
 	}
 
 	t1, err := r.Register("test-instance-1", c)
@@ -123,10 +125,11 @@ func TestRegistry_Sweep(t *testing.T) {
 	gb := budget.NewGlobalBudget(math.MaxInt64)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		Policy:        cache.NewLRUEvictionPolicy(),
-		MaxBytes:      512,
+		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
+		MaxBytes:      2048,
 		MaxKeys:       20,
 		SweepInterval: 50 * time.Millisecond,
+		ShardCount:    16,
 	}
 
 	token, err := r.Register("test-instance-1", c)
@@ -157,10 +160,11 @@ func TestRegistry_SweepStopsOnContextCancel(t *testing.T) {
 	gb := budget.NewGlobalBudget(math.MaxInt64)
 	r := NewRegistry(gb)
 	c := RegisterConfig{
-		Policy:        cache.NewLRUEvictionPolicy(),
-		MaxBytes:      512,
+		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
+		MaxBytes:      2048,
 		MaxKeys:       20,
 		SweepInterval: 50 * time.Millisecond,
+		ShardCount:    16,
 	}
 
 	token, _ := r.Register("test-instance", c)

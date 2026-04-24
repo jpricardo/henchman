@@ -32,7 +32,7 @@ type MetricsSnapshot struct {
 type Instance struct {
 	id             string
 	token          string
-	store          *cache.Store
+	store          *cache.SharedStore
 	ctx            context.Context
 	cancel         context.CancelFunc
 	allocatedBytes int64
@@ -60,7 +60,8 @@ func NewRegistry(gb *budget.GlobalBudget) *Registry {
 // #region Registry
 
 type RegisterConfig struct {
-	Policy        cache.EvictionPolicy
+	ShardCount    int64
+	PolicyFactory func() cache.EvictionPolicy
 	MaxBytes      int64
 	MaxKeys       int64
 	SweepInterval time.Duration
@@ -80,7 +81,7 @@ func (r *Registry) Register(id string, config RegisterConfig) (string, error) {
 		return "", err
 	}
 
-	s := cache.NewStore(config.Policy, config.MaxBytes, config.MaxKeys)
+	s := cache.NewSharedStore(config.ShardCount, config.PolicyFactory, config.MaxBytes, config.MaxKeys)
 
 	t, err := generateRandomHex(16)
 	if err != nil {
@@ -215,7 +216,7 @@ func (r *Registry) Snapshots() []MetricsSnapshot {
 
 // #endregion
 
-func sweep(ctx context.Context, s *cache.Store, metrics *InstanceMetrics, interval time.Duration) {
+func sweep(ctx context.Context, s *cache.SharedStore, metrics *InstanceMetrics, interval time.Duration) {
 	if interval <= 0 {
 		return
 	}
