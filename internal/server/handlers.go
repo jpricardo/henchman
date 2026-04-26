@@ -32,18 +32,23 @@ func (s *server) Register(ctx context.Context, r *pb.RegisterRequest) (*pb.Regis
 		return nil, status.Error(codes.InvalidArgument, "invalid eviction policy")
 	}
 
-	p := cache.NewLRUEvictionPolicy()
+	shardCount := r.Config.ShardCount
+	if shardCount == 0 || shardCount&(shardCount-1) != 0 {
+		return nil, status.Error(codes.InvalidArgument, "shard_count must be a non-zero power of two")
+	}
+
 	c := registry.RegisterConfig{
-		Policy:        p,
+		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
 		MaxBytes:      r.Config.MaxBytes,
 		MaxKeys:       r.Config.MaxKeys,
 		DefaultTTL:    time.Duration(r.Config.DefaultTtlMs) * time.Millisecond,
 		SweepInterval: time.Duration(r.Config.SweepIntervalMs) * time.Millisecond,
+		ShardCount:    shardCount,
 	}
 
 	token, err := s.r.Register(r.InstanceId, c)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "unable to register")
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	return &pb.RegisterResponse{Token: token}, nil

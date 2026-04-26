@@ -23,6 +23,7 @@ message InstanceConfig {
   int64  default_ttl_ms    = 3;
   string eviction_policy   = 4;
   int64  sweep_interval_ms = 5;
+  int64  shard_count        = 6;
 }
 
 message RegisterResponse {

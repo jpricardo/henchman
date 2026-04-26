@@ -3,19 +3,12 @@ package cache
 import (
 	"fmt"
 	"math"
-	"sync"
 	"testing"
 	"time"
 )
 
 func TestStore_CRUD(t *testing.T) {
-	s := Store{
-		mu:       sync.RWMutex{},
-		data:     make(map[string]*Entry),
-		policy:   NewLRUEvictionPolicy(),
-		maxBytes: math.MaxInt64,
-		maxKeys:  5,
-	}
+	s := NewSharedStore(16, func() EvictionPolicy { return NewLRUEvictionPolicy() }, math.MaxInt64, 5)
 
 	e := Entry{Key: "key"}
 
@@ -37,17 +30,17 @@ func TestStore_CRUD(t *testing.T) {
 
 func TestStore_EvictionOnFull(t *testing.T) {
 	// don't bother testing `maxBytes`, any change on the `Entry` struct could make the tests fail
-	s := NewStore(NewLRUEvictionPolicy(), math.MaxInt64, 5)
+	s := NewSharedStore(1, func() EvictionPolicy { return NewLRUEvictionPolicy() }, math.MaxInt64, 5)
 
-	for idx := range s.maxKeys {
+	for idx := range s.MaxKeys() {
 		err := s.Set(&Entry{Key: fmt.Sprintf("key-%d", idx+1)})
 		if err != nil {
 			t.Error(err.Error())
 		}
 	}
 
-	if s.policy.CurrentKeys() != s.maxKeys {
-		t.Errorf("Expected store to be full, got %d keys", s.policy.CurrentKeys())
+	if s.CurrentKeys() != s.MaxKeys() {
+		t.Errorf("Expected store to be full, got %d keys", s.CurrentKeys())
 	}
 
 	e := Entry{Key: "last-key"}
@@ -64,24 +57,24 @@ func TestStore_EvictionOnFull(t *testing.T) {
 		t.Error("Expected key-1 to have been evicted")
 	}
 
-	if s.maxKeys != s.policy.CurrentKeys() {
-		t.Errorf("Expected current keys %d to match max keys %d", s.policy.CurrentKeys(), s.maxKeys)
+	if s.MaxKeys() != s.CurrentKeys() {
+		t.Errorf("Expected current keys %d to match max keys %d", s.CurrentKeys(), s.MaxKeys())
 	}
 }
 
 func TestStore_OversizedEntry(t *testing.T) {
-	s := NewStore(NewLRUEvictionPolicy(), 1, 1)
+	s := NewSharedStore(16, func() EvictionPolicy { return NewLRUEvictionPolicy() }, 1, 1)
 
 	e := Entry{}
 	err := s.Set(&e)
 
 	if err == nil {
-		t.Errorf("Expected insertion to fail on max bytes %d", s.maxBytes)
+		t.Errorf("Expected insertion to fail on max bytes %d", s.MaxBytes())
 	}
 }
 
 func TestStore_ExpiredKey(t *testing.T) {
-	s := NewStore(NewLRUEvictionPolicy(), math.MaxInt64, 5)
+	s := NewSharedStore(16, func() EvictionPolicy { return NewLRUEvictionPolicy() }, math.MaxInt64, 5)
 
 	e := Entry{ExpiresAt: time.Now().Add(-10 * time.Minute)}
 	err := s.Set(&e)
