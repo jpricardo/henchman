@@ -51,6 +51,7 @@ func TestMetricsSmoke(t *testing.T) {
 			MaxKeys:         math.MaxInt64,
 			EvictionPolicy:  "lru",
 			SweepIntervalMs: 500,
+			ShardCount:      16,
 		},
 	})
 	require.NoError(t, err)

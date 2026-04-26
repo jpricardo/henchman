@@ -141,6 +141,7 @@ async function main() {
       defaultTtlMs: 300_000,
       evictionPolicy: 'lru',
       sweepIntervalMs: 60_000,
+      shardCount: 32
     },
   }, new grpc.Metadata());
 

@@ -64,6 +64,7 @@ func registerTestInstance(t *testing.T) (context.Context, pb.CacheClient, func()
 		DefaultTtlMs:    0,
 		EvictionPolicy:  "lru",
 		SweepIntervalMs: 500,
+		ShardCount:      16,
 	}
 	request := pb.RegisterRequest{InstanceId: "test-instance", Config: &config}
 
@@ -85,6 +86,7 @@ func TestRegister(t *testing.T) {
 		DefaultTtlMs:    0,
 		EvictionPolicy:  "lru",
 		SweepIntervalMs: 500,
+		ShardCount:      16,
 	}
 	request := pb.RegisterRequest{InstanceId: "test-instance", Config: &config}
 

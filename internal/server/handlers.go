@@ -38,8 +38,7 @@ func (s *server) Register(ctx context.Context, r *pb.RegisterRequest) (*pb.Regis
 		MaxKeys:       r.Config.MaxKeys,
 		DefaultTTL:    time.Duration(r.Config.DefaultTtlMs) * time.Millisecond,
 		SweepInterval: time.Duration(r.Config.SweepIntervalMs) * time.Millisecond,
-		// TODO - Env, request params?
-		ShardCount: 8,
+		ShardCount:    r.Config.ShardCount,
 	}
 
 	token, err := s.r.Register(r.InstanceId, c)
