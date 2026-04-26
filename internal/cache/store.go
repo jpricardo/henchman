@@ -3,6 +3,7 @@ package cache
 import (
 	"fmt"
 	"hash/fnv"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -175,6 +176,10 @@ type SharedStore struct {
 }
 
 func NewSharedStore(shardCount int64, policyFactory func() EvictionPolicy, maxBytes int64, maxKeys int64) *SharedStore {
+	if shardCount == 0 || shardCount&(shardCount-1) != 0 {
+		log.Panic("shardCount must be a non-zero power of two")
+	}
+
 	shards := []*StoreShard{}
 
 	for range shardCount {

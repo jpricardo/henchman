@@ -17,6 +17,7 @@ func TestRegistry_Registration(t *testing.T) {
 		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
 		MaxBytes:      512,
 		MaxKeys:       20,
+		ShardCount:    16,
 	}
 
 	token, err := r.Register("test-instance", c)
@@ -37,6 +38,7 @@ func TestRegistry_TokenUniqueness(t *testing.T) {
 		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
 		MaxBytes:      512,
 		MaxKeys:       20,
+		ShardCount:    16,
 	}
 
 	t1, err := r.Register("test-instance-1", c)
