@@ -29,12 +29,18 @@ func NewGRPCServer(r *registry.Registry) *grpc.Server {
 }
 
 func (s *server) Register(ctx context.Context, r *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	if r.Config.EvictionPolicy != "" && r.Config.EvictionPolicy != "lru" {
+	var policyFactory func() cache.EvictionPolicy
+	switch r.Config.EvictionPolicy {
+	case "", "lru":
+		policyFactory = func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() }
+	case "lfu":
+		policyFactory = func() cache.EvictionPolicy { return cache.NewLFUEvictionPolicy() }
+	default:
 		return nil, status.Error(codes.InvalidArgument, "invalid eviction policy")
 	}
 
 	c := registry.RegisterConfig{
-		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
+		PolicyFactory: policyFactory,
 		MaxBytes:      r.Config.MaxBytes,
 		MaxKeys:       r.Config.MaxKeys,
 		DefaultTTL:    time.Duration(r.Config.DefaultTtlMs) * time.Millisecond,
