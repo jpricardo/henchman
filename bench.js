@@ -9,6 +9,11 @@ const ADDRESS = process.env.HENCH_ADDR || 'localhost:6474';
 const N = 1_000;
 const SEED_CONCURRENCY = 200;
 const VALUE = Buffer.from('benchmark-value-payload-xxxxxxxxxxxxxxxxxxxxxxxxxxxx');
+// Pool of independent client connections. A single grpc-js Client is one HTTP/2
+// connection sharing one Node event loop; that caps throughput long before the
+// server saturates. Spreading concurrent workers across a pool removes the
+// client-side bottleneck so the numbers reflect actual server throughput.
+const POOL_SIZE = Number(process.env.HENCH_POOL_SIZE || 8);
 
 // ── gRPC setup ───────────────────────────────────────────────────────────────
 
@@ -102,17 +107,19 @@ async function benchConcurrent(name, n, concurrency, fn) {
   const samples = new Array(n);
   let next = 0;
 
-  async function worker() {
+  // workerIdx is passed to fn so each worker can pick a distinct client from
+  // the pool; this is what spreads load across connections.
+  async function worker(workerIdx) {
     while (next < n) {
       const i = next++;
       const t0 = process.hrtime.bigint();
-      await fn(i);
+      await fn(i, workerIdx);
       samples[i] = Number(process.hrtime.bigint() - t0) / 1e6;
     }
   }
 
   const wall0 = process.hrtime.bigint();
-  await Promise.all(Array.from({ length: concurrency }, worker));
+  await Promise.all(Array.from({ length: concurrency }, (_, w) => worker(w)));
   const wallMs = Number(process.hrtime.bigint() - wall0) / 1e6;
   console.log('done');
   return { name: `${name} [c=${concurrency}]`, n, tps: n / (wallMs / 1000), ...stats(samples) };
@@ -126,8 +133,22 @@ function waitReady(client, timeoutMs) {
   });
 }
 
-async function runSuite(client, policy) {
-  const { token } = await rpc(client, 'register', {
+// Every token we hand out gets tracked here so we can release the server-side
+// allocation on any exit path — normal return, thrown error, or signal.
+const liveTokens = new Set();
+
+async function flushToken(client, token) {
+  const meta = new grpc.Metadata();
+  meta.set('x-hench-token', token);
+  await rpc(client, 'flush', {}, meta).catch(() => {});
+  liveTokens.delete(token);
+}
+
+async function runSuite(pool, policy) {
+  // Register once via pool[0]; every client in the pool reuses the same token,
+  // so all connections target the same cache instance.
+  const setup = pool[0];
+  const { token } = await rpc(setup, 'register', {
     instanceId: `bench-${policy}-${Date.now()}`,
     config: {
       maxBytes: 256 * 1024 * 1024,
@@ -138,6 +159,7 @@ async function runSuite(client, policy) {
       shardCount: 32
     },
   }, new grpc.Metadata());
+  liveTokens.add(token);
 
   const meta = new grpc.Metadata();
   meta.set('x-hench-token', token);
@@ -146,61 +168,97 @@ async function runSuite(client, policy) {
     process.stdout.write(`\nWarming up [${policy}] ... `);
     const warmupVal = Buffer.from('w');
     for (let i = 0; i < 50; i++) {
-      await rpc(client, 'set', { key: `__warmup__${i}`, value: warmupVal, ttlMs: 0, invalidateAfterRead: false }, meta);
-      await rpc(client, 'get', { key: `__warmup__${i}` }, meta);
+      await rpc(setup, 'set', { key: `__warmup__${i}`, value: warmupVal, ttlMs: 0, invalidateAfterRead: false }, meta);
+      await rpc(setup, 'get', { key: `__warmup__${i}` }, meta);
     }
     console.log('done');
 
     console.log(`\nPreparing benchmarks [${policy}] ...`);
 
-    await seed(client, meta, 'single:', 1);
+    await seed(setup, meta, 'single:', 1);
     const singleRead = await bench('Single read', 100, () =>
-      rpc(client, 'get', { key: 'single:0' }, meta)
+      rpc(setup, 'get', { key: 'single:0' }, meta)
     );
 
-    await seed(client, meta, 'hit:', N);
+    await seed(setup, meta, 'hit:', N);
     const hitReads = await bench(`${N} reads (100% hit)`, N, (i) =>
-      rpc(client, 'get', { key: `hit:${i}` }, meta)
+      rpc(setup, 'get', { key: `hit:${i}` }, meta)
     );
 
-    await seed(client, meta, 'mix:', N / 2);
+    await seed(setup, meta, 'mix:', N / 2);
     const mixReads = await bench(`${N} reads (50% hit/miss)`, N, (i) =>
-      rpc(client, 'get', { key: `mix:${i}` }, meta)
+      rpc(setup, 'get', { key: `mix:${i}` }, meta)
     );
 
     const writes = await bench(`${N} writes`, N, (i) =>
-      rpc(client, 'set', { key: `write:${i}`, value: VALUE, ttlMs: 0, invalidateAfterRead: false }, meta)
+      rpc(setup, 'set', { key: `write:${i}`, value: VALUE, ttlMs: 0, invalidateAfterRead: false }, meta)
     );
+
+    const pick = (w) => pool[w % pool.length];
 
     const CONCURRENCIES = [10, 50, 100, 500, 1000];
     const concurrentResults = [];
     for (const c of CONCURRENCIES) {
-      concurrentResults.push(await benchConcurrent(`${N} reads (100% hit)`, N, c, (i) =>
-        rpc(client, 'get', { key: `hit:${i % N}` }, meta)
+      concurrentResults.push(await benchConcurrent(`${N} reads (100% hit)`, N, c, (i, w) =>
+        rpc(pick(w), 'get', { key: `hit:${i % N}` }, meta)
       ));
-      concurrentResults.push(await benchConcurrent(`${N} reads (50% hit/miss)`, N, c, (i) =>
-        rpc(client, 'get', { key: `mix:${i % N}` }, meta)
+      concurrentResults.push(await benchConcurrent(`${N} reads (50% hit/miss)`, N, c, (i, w) =>
+        rpc(pick(w), 'get', { key: `mix:${i % N}` }, meta)
       ));
     }
 
     return [singleRead, hitReads, mixReads, writes, ...concurrentResults];
   } finally {
-    await rpc(client, 'flush', {}, meta).catch(() => {});
+    await flushToken(setup, token);
   }
 }
 
-async function main() {
-  const client = new Cache(ADDRESS, grpc.credentials.createInsecure());
+function makeClient(id) {
+  // grpc-js coalesces channels by serialized args; varying `unique-id` and
+  // forcing a local subchannel pool guarantees each Client gets its own
+  // HTTP/2 connection.
+  return new Cache(ADDRESS, grpc.credentials.createInsecure(), {
+    'grpc.use_local_subchannel_pool': 1,
+    'unique-id': id,
+  });
+}
 
-  process.stdout.write(`\nConnecting to ${ADDRESS} ... `);
-  await waitReady(client, 5000);
+async function cleanup(pool) {
+  if (liveTokens.size > 0) {
+    process.stdout.write(`\nCleaning up ${liveTokens.size} instance(s) ... `);
+    await Promise.all(
+      [...liveTokens].map((t) => flushToken(pool[0], t))
+    );
+    console.log('done');
+  }
+  for (const c of pool) c.close();
+}
+
+async function main() {
+  const pool = Array.from({ length: POOL_SIZE }, (_, i) => makeClient(i));
+
+  process.stdout.write(`\nConnecting ${POOL_SIZE} client(s) to ${ADDRESS} ... `);
+  await Promise.all(pool.map((c) => waitReady(c, 5000)));
   console.log('ready');
+
+  // Best-effort cleanup if the process is interrupted. SIGINT/SIGTERM bypasses
+  // try/finally, so we flush whatever tokens are still tracked and exit.
+  let cleaningUp = false;
+  const onSignal = async (sig) => {
+    if (cleaningUp) return;
+    cleaningUp = true;
+    console.log(`\nReceived ${sig}, cleaning up...`);
+    await cleanup(pool).catch(() => {});
+    process.exit(130);
+  };
+  process.on('SIGINT', () => onSignal('SIGINT'));
+  process.on('SIGTERM', () => onSignal('SIGTERM'));
 
   try {
     const policies = ['lru', 'lfu'];
     const resultsByPolicy = {};
     for (const policy of policies) {
-      resultsByPolicy[policy] = await runSuite(client, policy);
+      resultsByPolicy[policy] = await runSuite(pool, policy);
     }
 
     for (const policy of policies) {
@@ -209,7 +267,7 @@ async function main() {
     }
     console.log();
   } finally {
-    client.close();
+    await cleanup(pool);
   }
 }
 
