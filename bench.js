@@ -126,20 +126,14 @@ function waitReady(client, timeoutMs) {
   });
 }
 
-async function main() {
-  const client = new Cache(ADDRESS, grpc.credentials.createInsecure());
-
-  process.stdout.write(`\nConnecting to ${ADDRESS} ... `);
-  await waitReady(client, 5000);
-  console.log('ready');
-
+async function runSuite(client, policy) {
   const { token } = await rpc(client, 'register', {
-    instanceId: `bench-${Date.now()}`,
+    instanceId: `bench-${policy}-${Date.now()}`,
     config: {
       maxBytes: 256 * 1024 * 1024,
       maxKeys: N * 4,
       defaultTtlMs: 300_000,
-      evictionPolicy: 'lru',
+      evictionPolicy: policy,
       sweepIntervalMs: 60_000,
       shardCount: 32
     },
@@ -149,59 +143,72 @@ async function main() {
   meta.set('x-hench-token', token);
 
   try {
-  // Warm up: drain any HTTP/2 flow-control and server-side JIT overhead
-  // before any timed section starts.
-  process.stdout.write('\nWarming up ... ');
-  const warmupVal = Buffer.from('w');
-  for (let i = 0; i < 50; i++) {
-    await rpc(client, 'set', { key: `__warmup__${i}`, value: warmupVal, ttlMs: 0, invalidateAfterRead: false }, meta);
-    await rpc(client, 'get', { key: `__warmup__${i}` }, meta);
-  }
-  console.log('done');
+    process.stdout.write(`\nWarming up [${policy}] ... `);
+    const warmupVal = Buffer.from('w');
+    for (let i = 0; i < 50; i++) {
+      await rpc(client, 'set', { key: `__warmup__${i}`, value: warmupVal, ttlMs: 0, invalidateAfterRead: false }, meta);
+      await rpc(client, 'get', { key: `__warmup__${i}` }, meta);
+    }
+    console.log('done');
 
-  console.log('\nPreparing benchmarks ...');
+    console.log(`\nPreparing benchmarks [${policy}] ...`);
 
-  // 1. Single read — pre-populate one key, measure 100 sequential reads
-  await seed(client, meta, 'single:', 1);
-  const singleRead = await bench('Single read', 100, () =>
-    rpc(client, 'get', { key: 'single:0' }, meta)
-  );
+    await seed(client, meta, 'single:', 1);
+    const singleRead = await bench('Single read', 100, () =>
+      rpc(client, 'get', { key: 'single:0' }, meta)
+    );
 
-  // 2. 10k reads — 100% hit rate
-  await seed(client, meta, 'hit:', N);
-  const hitReads = await bench(`${N} reads (100% hit)`, N, (i) =>
-    rpc(client, 'get', { key: `hit:${i}` }, meta)
-  );
+    await seed(client, meta, 'hit:', N);
+    const hitReads = await bench(`${N} reads (100% hit)`, N, (i) =>
+      rpc(client, 'get', { key: `hit:${i}` }, meta)
+    );
 
-  // 3. 10k reads — 50% hit rate (keys mix:0..4999 exist, mix:5000..9999 don't)
-  await seed(client, meta, 'mix:', N / 2);
-  const mixReads = await bench(`${N} reads (50% hit/miss)`, N, (i) =>
-    rpc(client, 'get', { key: `mix:${i}` }, meta)
-  );
+    await seed(client, meta, 'mix:', N / 2);
+    const mixReads = await bench(`${N} reads (50% hit/miss)`, N, (i) =>
+      rpc(client, 'get', { key: `mix:${i}` }, meta)
+    );
 
-  // 4. 10k writes
-  const writes = await bench(`${N} writes`, N, (i) =>
-    rpc(client, 'set', { key: `write:${i}`, value: VALUE, ttlMs: 0, invalidateAfterRead: false }, meta)
-  );
+    const writes = await bench(`${N} writes`, N, (i) =>
+      rpc(client, 'set', { key: `write:${i}`, value: VALUE, ttlMs: 0, invalidateAfterRead: false }, meta)
+    );
 
-  // 5–14. Concurrent reads at varying concurrency levels
-  const CONCURRENCIES = [10, 50, 100, 500, 1000];
-  const concurrentResults = [];
-  for (const c of CONCURRENCIES) {
-    concurrentResults.push(await benchConcurrent(`${N} reads (100% hit)`, N, c, (i) =>
-      rpc(client, 'get', { key: `hit:${i % N}` }, meta)
-    ));
-    concurrentResults.push(await benchConcurrent(`${N} reads (50% hit/miss)`, N, c, (i) =>
-      rpc(client, 'get', { key: `mix:${i % N}` }, meta)
-    ));
-  }
+    const CONCURRENCIES = [10, 50, 100, 500, 1000];
+    const concurrentResults = [];
+    for (const c of CONCURRENCIES) {
+      concurrentResults.push(await benchConcurrent(`${N} reads (100% hit)`, N, c, (i) =>
+        rpc(client, 'get', { key: `hit:${i % N}` }, meta)
+      ));
+      concurrentResults.push(await benchConcurrent(`${N} reads (50% hit/miss)`, N, c, (i) =>
+        rpc(client, 'get', { key: `mix:${i % N}` }, meta)
+      ));
+    }
 
-  console.log('\n── Latency Results ─────────────────────────────────────────────────────────\n');
-  printTable([singleRead, hitReads, mixReads, writes, ...concurrentResults]);
-  console.log();
-
+    return [singleRead, hitReads, mixReads, writes, ...concurrentResults];
   } finally {
     await rpc(client, 'flush', {}, meta).catch(() => {});
+  }
+}
+
+async function main() {
+  const client = new Cache(ADDRESS, grpc.credentials.createInsecure());
+
+  process.stdout.write(`\nConnecting to ${ADDRESS} ... `);
+  await waitReady(client, 5000);
+  console.log('ready');
+
+  try {
+    const policies = ['lru', 'lfu'];
+    const resultsByPolicy = {};
+    for (const policy of policies) {
+      resultsByPolicy[policy] = await runSuite(client, policy);
+    }
+
+    for (const policy of policies) {
+      console.log(`\n── Latency Results [${policy.toUpperCase()}] ─────────────────────────────────\n`);
+      printTable(resultsByPolicy[policy]);
+    }
+    console.log();
+  } finally {
     client.close();
   }
 }
