@@ -4,12 +4,21 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/jpricardo/henchman/internal/budget"
 	"github.com/jpricardo/henchman/internal/cache"
+)
+
+// Sentinel errors returned by Register so callers (e.g. the gRPC handler) can map
+// them to appropriate response codes without coupling this package to grpc/codes.
+var (
+	ErrInvalidConfig    = errors.New("invalid instance config")
+	ErrBudgetExhausted  = errors.New("global memory budget exhausted")
 )
 
 type InstanceMetrics struct {
@@ -78,10 +87,14 @@ func (r *Registry) Register(id string, config RegisterConfig) (string, error) {
 
 	err := r.gb.Reserve(config.MaxBytes)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrBudgetExhausted, err)
 	}
 
-	s := cache.NewSharedStore(config.ShardCount, config.PolicyFactory, config.MaxBytes, config.MaxKeys)
+	s, err := cache.NewSharedStore(config.ShardCount, config.PolicyFactory, config.MaxBytes, config.MaxKeys)
+	if err != nil {
+		r.gb.Release(config.MaxBytes)
+		return "", fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
 
 	t, err := generateRandomHex(16)
 	if err != nil {

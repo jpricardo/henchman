@@ -8,11 +8,14 @@ import (
 )
 
 func TestStore_CRUD(t *testing.T) {
-	s := NewSharedStore(16, func() EvictionPolicy { return NewLRUEvictionPolicy() }, math.MaxInt64, 5)
+	s, err := NewSharedStore(16, func() EvictionPolicy { return NewLRUEvictionPolicy() }, math.MaxInt64, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	e := Entry{Key: "key"}
 
-	err := s.Set(&e)
+	err = s.Set(&e)
 	if err != nil {
 		t.Error(err.Error())
 	}
@@ -30,7 +33,10 @@ func TestStore_CRUD(t *testing.T) {
 
 func TestStore_EvictionOnFull(t *testing.T) {
 	// don't bother testing `maxBytes`, any change on the `Entry` struct could make the tests fail
-	s := NewSharedStore(1, func() EvictionPolicy { return NewLRUEvictionPolicy() }, math.MaxInt64, 5)
+	s, err := NewSharedStore(1, func() EvictionPolicy { return NewLRUEvictionPolicy() }, math.MaxInt64, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for idx := range s.MaxKeys() {
 		err := s.Set(&Entry{Key: fmt.Sprintf("key-%d", idx+1)})
@@ -44,7 +50,7 @@ func TestStore_EvictionOnFull(t *testing.T) {
 	}
 
 	e := Entry{Key: "last-key"}
-	err := s.Set(&e)
+	err = s.Set(&e)
 	if err != nil {
 		t.Error(err.Error())
 	}
@@ -63,21 +69,55 @@ func TestStore_EvictionOnFull(t *testing.T) {
 }
 
 func TestStore_OversizedEntry(t *testing.T) {
-	s := NewSharedStore(16, func() EvictionPolicy { return NewLRUEvictionPolicy() }, 1, 1)
+	// shardCount=1: testing per-entry size rejection, not sharding behaviour.
+	s, err := NewSharedStore(1, func() EvictionPolicy { return NewLRUEvictionPolicy() }, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	e := Entry{}
-	err := s.Set(&e)
+	err = s.Set(&e)
 
 	if err == nil {
 		t.Errorf("Expected insertion to fail on max bytes %d", s.MaxBytes())
 	}
 }
 
+func TestStore_RejectsMaxKeysBelowShardCount(t *testing.T) {
+	_, err := NewSharedStore(16, func() EvictionPolicy { return NewLRUEvictionPolicy() }, math.MaxInt64, 5)
+	if err == nil {
+		t.Fatal("expected NewSharedStore to reject maxKeys < shardCount, got nil error")
+	}
+}
+
+func TestStore_RejectsMaxBytesBelowShardCount(t *testing.T) {
+	_, err := NewSharedStore(16, func() EvictionPolicy { return NewLRUEvictionPolicy() }, 8, math.MaxInt64)
+	if err == nil {
+		t.Fatal("expected NewSharedStore to reject maxBytes < shardCount, got nil error")
+	}
+}
+
+func TestStore_RefusesWriteWhenEvictionCannotFreeRoom(t *testing.T) {
+	s := NewStoreShard(NewLRUEvictionPolicy(), math.MaxInt64, 0)
+
+	err := s.Set(&Entry{Key: "k"})
+	if err == nil {
+		t.Error("expected Set to fail when eviction cannot free room, got nil")
+	}
+
+	if s.CurrentKeys() != 0 {
+		t.Errorf("expected store to remain empty after failed Set, got %d keys", s.CurrentKeys())
+	}
+}
+
 func TestStore_ExpiredKey(t *testing.T) {
-	s := NewSharedStore(16, func() EvictionPolicy { return NewLRUEvictionPolicy() }, math.MaxInt64, 5)
+	s, err := NewSharedStore(16, func() EvictionPolicy { return NewLRUEvictionPolicy() }, math.MaxInt64, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	e := Entry{ExpiresAt: time.Now().Add(-10 * time.Minute)}
-	err := s.Set(&e)
+	err = s.Set(&e)
 	if err != nil {
 		t.Error(err.Error())
 	}

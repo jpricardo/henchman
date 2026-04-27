@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	pb "github.com/jpricardo/henchman/gen/proto/henchman/v1"
@@ -32,23 +33,25 @@ func (s *server) Register(ctx context.Context, r *pb.RegisterRequest) (*pb.Regis
 		return nil, status.Error(codes.InvalidArgument, "invalid eviction policy")
 	}
 
-	shardCount := r.Config.ShardCount
-	if shardCount == 0 || shardCount&(shardCount-1) != 0 {
-		return nil, status.Error(codes.InvalidArgument, "shard_count must be a non-zero power of two")
-	}
-
 	c := registry.RegisterConfig{
 		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
 		MaxBytes:      r.Config.MaxBytes,
 		MaxKeys:       r.Config.MaxKeys,
 		DefaultTTL:    time.Duration(r.Config.DefaultTtlMs) * time.Millisecond,
 		SweepInterval: time.Duration(r.Config.SweepIntervalMs) * time.Millisecond,
-		ShardCount:    shardCount,
+		ShardCount:    r.Config.ShardCount,
 	}
 
 	token, err := s.r.Register(r.InstanceId, c)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		switch {
+		case errors.Is(err, registry.ErrInvalidConfig):
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		case errors.Is(err, registry.ErrBudgetExhausted):
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
+		default:
+			return nil, status.Error(codes.Internal, err.Error())
+		}
 	}
 
 	return &pb.RegisterResponse{Token: token}, nil

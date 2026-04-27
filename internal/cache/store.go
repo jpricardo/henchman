@@ -3,7 +3,6 @@ package cache
 import (
 	"fmt"
 	"hash/fnv"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -49,7 +48,7 @@ func (s *StoreShard) Set(entry *Entry) error {
 
 		ev, _, ok := s.policy.Evict()
 		if !ok {
-			break
+			return fmt.Errorf("cannot fit entry: would exceed shard cap (%d bytes / %d keys)", s.maxBytes, s.maxKeys)
 		}
 
 		delete(s.data, ev)
@@ -175,9 +174,15 @@ type SharedStore struct {
 	shards []*StoreShard
 }
 
-func NewSharedStore(shardCount int64, policyFactory func() EvictionPolicy, maxBytes int64, maxKeys int64) *SharedStore {
-	if shardCount == 0 || shardCount&(shardCount-1) != 0 {
-		log.Panic("shardCount must be a non-zero power of two")
+func NewSharedStore(shardCount int64, policyFactory func() EvictionPolicy, maxBytes int64, maxKeys int64) (*SharedStore, error) {
+	if shardCount <= 0 || shardCount&(shardCount-1) != 0 {
+		return nil, fmt.Errorf("shardCount must be a non-zero power of two, got %d", shardCount)
+	}
+	if maxBytes < shardCount {
+		return nil, fmt.Errorf("maxBytes (%d) must be >= shardCount (%d) so each shard has at least one byte of capacity", maxBytes, shardCount)
+	}
+	if maxKeys < shardCount {
+		return nil, fmt.Errorf("maxKeys (%d) must be >= shardCount (%d) so each shard has at least one key slot", maxKeys, shardCount)
 	}
 
 	shards := []*StoreShard{}
@@ -186,9 +191,7 @@ func NewSharedStore(shardCount int64, policyFactory func() EvictionPolicy, maxBy
 		shards = append(shards, NewStoreShard(policyFactory(), maxBytes/shardCount, maxKeys/shardCount))
 	}
 
-	return &SharedStore{
-		shards: shards,
-	}
+	return &SharedStore{shards: shards}, nil
 }
 
 // #endregion

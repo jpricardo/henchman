@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -112,6 +113,9 @@ func TestRegistry_BudgetRelease(t *testing.T) {
 	if err == nil {
 		t.Error("Expected Register to fail")
 	}
+	if !errors.Is(err, ErrBudgetExhausted) {
+		t.Errorf("Expected ErrBudgetExhausted, got %v", err)
+	}
 	defer r.Remove(t2)
 
 	r.Remove(t1)
@@ -156,6 +160,33 @@ func TestRegistry_Sweep(t *testing.T) {
 	if i1.metrics.ExpiredSwept() == 0 {
 		t.Errorf("Expected expired swept to equal 1, got %d", i1.metrics.expiredSwept.Load())
 	}
+}
+
+func TestRegistry_InvalidConfigReturnsSentinel(t *testing.T) {
+	gb := budget.NewGlobalBudget(math.MaxInt64)
+	r := NewRegistry(gb)
+	c := RegisterConfig{
+		PolicyFactory: func() cache.EvictionPolicy { return cache.NewLRUEvictionPolicy() },
+		MaxBytes:      2048,
+		MaxKeys:       5, // < ShardCount
+		ShardCount:    16,
+	}
+
+	_, err := r.Register("test-instance", c)
+	if err == nil {
+		t.Fatal("expected Register to fail with invalid config")
+	}
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig, got %v", err)
+	}
+
+	// Budget must have been released, a follow-up registration with a valid config should succeed.
+	c.MaxKeys = 20
+	token, err := r.Register("test-instance-2", c)
+	if err != nil {
+		t.Errorf("expected follow-up registration to succeed (budget should have been released), got %v", err)
+	}
+	defer r.Remove(token)
 }
 
 func TestRegistry_SweepStopsOnContextCancel(t *testing.T) {
