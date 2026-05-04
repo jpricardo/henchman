@@ -2,7 +2,6 @@ package cache
 
 import (
 	"fmt"
-	"hash/fnv"
 	"strings"
 	"sync"
 	"time"
@@ -366,7 +365,13 @@ func (s *SharedStore) Query(keyPrefix string, invalidateMatched bool) []*Entry {
 }
 
 func shardIndex(key string, numShards int) int {
-	h := fnv.New32a()
-	h.Write([]byte(key))
-	return int(h.Sum32()) & (numShards - 1)
+	h := 2166136261
+	bytes := []byte(key)
+
+	for i := range bytes {
+		b := int(bytes[i])
+		h = (h ^ b) * 16777619
+	}
+
+	return int(h) & (numShards - 1)
 }
